@@ -16,7 +16,7 @@ from aiohttp import web
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CLAN_TAG = os.getenv("CLAN_TAG", "RGW")
 CHANNEL_ID = os.getenv("CHANNEL_ID")                     # Kanaal voor Rebirths (xx:00)
-PUMPKINS_CHANNEL_ID = os.getenv("PUMPKINS_CHANNEL_ID")   # Kanaal voor Pumpkins (xx:30)
+PUMPKINS_CHANNEL_ID = os.getenv("PUMPKINS_CHANNEL_ID")   # Kanaal voor PowerfulCoins (xx:30)
 API_BASE = "https://public-api.powerfulstudio.xyz"
 
 DB_PATH = "/var/data/rebirths.db" if os.path.exists("/var/data") else "rebirths.db"
@@ -140,7 +140,7 @@ async def start_dummy_webserver():
     app.router.add_get('/', handle_ping)
     runner = web.AppRunner(app)
     await runner.setup()
-    port = int(os.getenv("PORT", 8080))
+    port = int(os.getenv("PORT", 10000))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
     print(f"🌐 Webserver gestart op poort {port}")
@@ -165,13 +165,13 @@ async def fetch_clan_data(session, tag):
         print(f"API Error: {e}")
     return None
 
-def extract_currency_map(clan_data, keyword="pumpkins"):
+def extract_currency_map(clan_data, keyword="powerfulCoins"):
     currency_map = {}
     currencies = clan_data.get("currencies", {})
     
     target_key = None
     for key in currencies.keys():
-        if keyword in key.lower():
+        if keyword.lower() in key.lower():
             target_key = key
             break
             
@@ -281,7 +281,7 @@ async def build_leaderboard_embeds(stat_type="rebirths"):
         pumpkin_map = {}
 
         if stat_type == "pumpkins":
-            pumpkin_map = extract_currency_map(clan_data, keyword="pumpkins")
+            pumpkin_map = extract_currency_map(clan_data, keyword="powerfulCoins")
             members.sort(key=lambda x: float(pumpkin_map.get(str(x.get("userId") or x.get("id") or x.get("username")), 0)), reverse=True)
         else:
             members.sort(key=lambda x: float(x.get("rebirths", 0)), reverse=True)
@@ -296,7 +296,7 @@ async def build_leaderboard_embeds(stat_type="rebirths"):
             entry = await build_entry(session, idx, m, members, stat_type, pumpkin_map)
             lines_part2.append(entry)
 
-        title_prefix = "📊 Rebirth Stats" if stat_type == "rebirths" else "🎃 Pumpkin Stats"
+        title_prefix = "📊 Rebirth Stats" if stat_type == "rebirths" else "🪙 PowerfulCoins Stats"
         embed1 = discord.Embed(title=f"{title_prefix} — Clan {CLAN_TAG} (1-10)", color=0x2b2d31, description="\n\n".join(lines_part1))
         embed2 = discord.Embed(title=f"{title_prefix} — Clan {CLAN_TAG} (11-25)", color=0x2b2d31, description="\n\n".join(lines_part2) if lines_part2 and lines_part2[0] else None)
 
@@ -308,7 +308,7 @@ async def track_data():
     async with aiohttp.ClientSession() as session:
         clan_data = await fetch_clan_data(session, CLAN_TAG)
         if clan_data and "members" in clan_data:
-            pumpkin_map = extract_currency_map(clan_data, keyword="pumpkins")
+            pumpkin_map = extract_currency_map(clan_data, keyword="powerfulCoins")
             for member in clan_data["members"]:
                 u_id = str(member.get("userId") or member.get("id") or member.get("username"))
                 username = await resolve_username(session, member)
@@ -316,7 +316,7 @@ async def track_data():
                 pumpkins = float(pumpkin_map.get(u_id, 0))
                 save_snapshot(u_id, username, rebirths, pumpkins)
 
-# Broadcasters (Rebirths om xx:00 en Pumpkins om xx:30)
+# Broadcasters (Rebirths om xx:00 en PowerfulCoins om xx:30)
 @tasks.loop(minutes=1)
 async def hourly_broadcaster():
     now = datetime.now(timezone.utc)
