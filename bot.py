@@ -48,7 +48,7 @@ def init_db():
             c.execute("ALTER TABLE snapshots ADD COLUMN powerfulcoins REAL DEFAULT 0")
         except sqlite3.OperationalError:
             pass
-        # Voor compatibiliteit met oude databases die nog 'pumpkins' hadden:
+        # Migratie voor eventuele oude tabellen die 'pumpkins' heetten
         try:
             c.execute("ALTER TABLE snapshots RENAME COLUMN pumpkins TO powerfulcoins")
         except sqlite3.OperationalError:
@@ -265,4 +265,101 @@ async def build_entry(session, idx, m, members, stat_type="rebirths", coin_map=N
 
             gap_trend = f"↗️ closing gap ({overtake_str})"
         elif gain_1h < prev_gain1h:
-            gap_trend = "↘️
+            gap_trend = "↘️ gap widening"
+        else:
+            gap_trend = "➡️ gap stable"
+
+        gap_line = f"└ {format_number(diff)} behind #{idx-1} · {gap_trend}"
+
+    entry_lines = [header_line, stat_line, period_line]
+    if gap_line:
+        entry_lines.append(gap_line)
+
+    return "\n".join(entry_lines)
+
+async def build_leaderboard_embeds(stat_type="rebirths"):
+    async with aiohttp.ClientSession() as session:
+        clan_data = await fetch_clan_data(session, CLAN_TAG)
+        if not clan_data or "members" not in clan_data:
+            return None, None
+
+        members = clan_data["members"]
+        coin_map = {}
+
+        if stat_type == "powerfulcoins":
+            coin_map = extract_currency_map(clan_data, keyword="powerfulCoins")
+            members.sort(key=lambda x: float(coin_map.get(str(x.get("userId") or x.get("id") or x.get("username")), 0)), reverse=True)
+        else:
+            members.sort(key=lambda x: float(x.get("rebirths", 0)), reverse=True)
+
+        lines_part1, lines_part2 = [], []
+
+        for idx, m in enumerate(members[:10], start=1):
+            entry = await build_entry(session, idx, m, members, stat_type, coin_map)
+            lines_part1.append(entry)
+
+        for idx, m in enumerate(members[10:25], start=11):
+            entry = await build_entry(session, idx, m, members, stat_type, coin_map)
+            lines_part2.append(entry)
+
+        title_prefix = "📊 Rebirth Stats" if stat_type == "rebirths" else "🪙 PowerfulCoins Stats"
+        embed1 = discord.Embed(title=f"{title_prefix} — Clan {CLAN_TAG} (1-10)", color=0x2b2d31, description="\n\n".join(lines_part1))
+        embed2 = discord.Embed(title=f"{title_prefix} — Clan {CLAN_TAG} (11-25)", color=0x2b2d31, description="\n\n".join(lines_part2) if lines_part2 and lines_part2[0] else None)
+
+        return embed1, embed2
+
+# Data opslaan elke 10 minuten
+@tasks.loop(minutes=10)
+async def track_data():
+    async with aiohttp.ClientSession() as session:
+        clan_data = await fetch_clan_data(session, CLAN_TAG)
+        if clan_data and "members" in clan_data:
+            coin_map = extract_currency_map(clan_data, keyword="powerfulCoins")
+            for member in clan_data["members"]:
+                u_id = str(member.get("userId") or member.get("id") or member.get("username"))
+                username = await resolve_username(session, member)
+                rebirths = float(member.get("rebirths", 0))
+                powerfulcoins = float(coin_map.get(u_id, 0))
+                save_snapshot(u_id, username, rebirths, powerfulcoins)
+
+# Broadcasters (Rebirths om xx:00 en PowerfulCoins om xx:30)
+@tasks.loop(minutes=1)
+async def hourly_broadcaster():
+    now = datetime.now(timezone.utc)
+    
+    if now.minute == 0 and CHANNEL_ID:
+        try:
+            channel = bot.get_channel(int(CHANNEL_ID))
+            if channel:
+                e1, e2 = await build_leaderboard_embeds("rebirths")
+                if e1: await channel.send(embed=e1)
+                if e2 and e2.description: await channel.send(embed=e2)
+        except Exception as err:
+            print(f"Error in rebirth broadcaster: {err}")
+
+    if now.minute == 30 and POWERFULCOINS_CHANNEL_ID:
+        try:
+            p_channel = bot.get_channel(int(POWERFULCOINS_CHANNEL_ID))
+            if p_channel:
+                e1, e2 = await build_leaderboard_embeds("powerfulcoins")
+                if e1: await p_channel.send(embed=e1)
+                if e2 and e2.description: await p_channel.send(embed=e2)
+        except Exception as err:
+            print(f"Error in powerfulcoins broadcaster: {err}")
+
+@hourly_broadcaster.before_loop
+async def before_hourly_broadcaster():
+    await bot.wait_until_ready()
+
+@bot.event
+async def on_ready():
+    init_db()
+    if not track_data.is_running(): track_data.start()
+    if not hourly_broadcaster.is_running(): hourly_broadcaster.start()
+    print(f"✅ Bot online als: {bot.user}")
+
+# --- Bot Commando's ---
+@bot.command(name="stats")
+async def send_leaderboard(ctx):
+    async with ctx.typing():
+        e1, e2 =
