@@ -362,4 +362,80 @@ async def on_ready():
 @bot.command(name="stats")
 async def send_leaderboard(ctx):
     async with ctx.typing():
-        e1, e2 =
+        e1, e2 = await build_leaderboard_embeds("rebirths")
+        if e1:
+            await ctx.send(embed=e1)
+            if e2 and e2.description: await ctx.send(embed=e2)
+
+@bot.command(name="powerfulcoins")
+async def send_powerfulcoins_leaderboard(ctx):
+    async with ctx.typing():
+        e1, e2 = await build_leaderboard_embeds("powerfulcoins")
+        if e1:
+            await ctx.send(embed=e1)
+            if e2 and e2.description: await ctx.send(embed=e2)
+
+# Achtervang voor oude commando's
+@bot.command(name="pumpkins")
+async def send_old_pumpkins_redirect(ctx):
+    async with ctx.typing():
+        e1, e2 = await build_leaderboard_embeds("powerfulcoins")
+        if e1:
+            await ctx.send(embed=e1)
+            if e2 and e2.description: await ctx.send(embed=e2)
+
+@bot.command(name="rush")
+async def rush_command(ctx):
+    response = random.choice(["El Dictator", "Rushy Plushy"])
+    await ctx.send(response)
+
+@bot.command(name="peste")
+async def peste_command(ctx):
+    await ctx.send("Pasta pesto")
+
+@bot.command(name="khelestial")
+async def khelestial_command(ctx):
+    await ctx.send("No mute for me , neither demote.,.")
+
+@bot.command(name="allcommands")
+async def show_all_api_fields(ctx):
+    async with ctx.typing(), aiohttp.ClientSession() as session:
+        clan_data = await fetch_clan_data(session, CLAN_TAG)
+        if clan_data:
+            currencies = clan_data.get("currencies", {})
+            embed = discord.Embed(title=f"🔍 Beschikbare Currencies — Clan {CLAN_TAG}", color=0x2b2d31)
+            embed.add_field(name="Gevonden Currency Sleutels:", value=str(list(currencies.keys())), inline=False)
+            await ctx.send(embed=embed)
+        else:
+            await ctx.send("Kon geen clan-data ophalen.")
+
+async def main():
+    if not BOT_TOKEN:
+        print("FOUT: Geen BOT_TOKEN ingesteld.")
+        return
+    
+    await start_dummy_webserver()
+    
+    while True:
+        try:
+            print("🤖 Verbinden met Discord...")
+            await bot.start(BOT_TOKEN)
+        except discord.errors.HTTPException as e:
+            if e.status == 429:
+                print("⚠️ Discord Rate Limit (429) geraakt. 60 seconden wachten...")
+                await asyncio.sleep(60)
+            else:
+                traceback.print_exc()
+                await asyncio.sleep(10)
+        except Exception as e:
+            print(f"Fout bij opstarten: {e}")
+            traceback.print_exc()
+            await asyncio.sleep(10)
+
+if __name__ == "__main__":
+    try:
+        async_run(main())
+    except Exception:
+        traceback.print_exc()
+        time.sleep(10)
+        sys.exit(1)
